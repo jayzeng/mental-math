@@ -1,13 +1,12 @@
 
-import React, { useState, useEffect, useCallback } from 'react';
-import { CategoryType, Problem, UserProgress, ProblemPool, StuffyBadge } from './types';
+import React, { useState, useEffect } from 'react';
+import { CategoryType, Problem, UserProgress, StuffyBadge } from './types';
 import { CATEGORIES, STUFFY_BADGES } from './constants';
-import { generateProblems, getLocalBuddyResponse } from './services/geminiService';
+import { getProblems, getLocalBuddyResponse } from './services/geminiService';
 import MathBuddy from './components/MathBuddy';
 import ProblemCard from './components/ProblemCard';
 
 const STORAGE_KEY_PROGRESS = 'mathquest_progress_v2';
-const STORAGE_KEY_POOL = 'mathquest_pool_v2';
 
 const App: React.FC = () => {
   const [view, setView] = useState<'home' | 'arena' | 'collection'>('home');
@@ -19,12 +18,7 @@ const App: React.FC = () => {
   const [buddyMood, setBuddyMood] = useState<'happy' | 'neutral' | 'thinking'>('neutral');
   const [showTrick, setShowTrick] = useState(false);
   const [newBadge, setNewBadge] = useState<StuffyBadge | null>(null);
-  
-  const [pool, setPool] = useState<ProblemPool>(() => {
-    const saved = localStorage.getItem(STORAGE_KEY_POOL);
-    if (saved) return JSON.parse(saved);
-    return CATEGORIES.reduce((acc, cat) => ({ ...acc, [cat.id]: [] }), {} as ProblemPool);
-  });
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const [progress, setProgress] = useState<UserProgress>(() => {
     const saved = localStorage.getItem(STORAGE_KEY_PROGRESS);
@@ -37,65 +31,40 @@ const App: React.FC = () => {
     };
   });
 
-  // Save to LocalStorage whenever state changes
+  // Save progress to LocalStorage whenever it changes
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY_PROGRESS, JSON.stringify(progress));
   }, [progress]);
-
-  useEffect(() => {
-    localStorage.setItem(STORAGE_KEY_POOL, JSON.stringify(pool));
-  }, [pool]);
-
-  // Background filler
-  const fillPools = useCallback(async (targetCategory?: CategoryType) => {
-    const categoriesToFill = targetCategory ? [targetCategory] : CATEGORIES.map(c => c.id);
-    
-    for (const cat of categoriesToFill) {
-      if (pool[cat].length < 5) {
-        console.log(`[MathQuest] Filling pool for ${cat}...`);
-        const newProblems = await generateProblems(cat, 5, progress.seenProblemIds);
-        setPool(prev => ({
-          ...prev,
-          [cat]: [...prev[cat], ...newProblems]
-        }));
-      }
-    }
-  }, [pool, progress.seenProblemIds]);
-
-  // Initial load: fill all pools
-  useEffect(() => {
-    fillPools();
-  }, []);
 
   const handleStartCategory = async (category: CategoryType) => {
     setSelectedCategory(category);
     setView('arena');
     setLoading(true);
+    setLoadError(null);
     setNewBadge(null);
 
-    let categoryProblems = pool[category];
-    
-    if (categoryProblems.length < 5) {
-      setBuddyMood('thinking');
-      setBuddyMsg("Summoning new challenges from the cloud... ☁️");
-      const fresh = await generateProblems(category, 5, progress.seenProblemIds);
-      categoryProblems = fresh;
+    try {
+      const categoryProblems = await getProblems(category, 5, progress.seenProblemIds);
+
+      if (categoryProblems.length === 0) {
+        setLoadError("No more problems available for this category. Run the generator script to add more!");
+        setLoading(false);
+        return;
+      }
+
+      setProblems(categoryProblems);
+      setCurrentIndex(0);
+      setBuddyMood('neutral');
+      setBuddyMsg(`Complete this round to earn a new Stuffy Friend!`);
+      setShowTrick(false);
+    } catch (err) {
+      console.error("Failed to load problems:", err);
+      setLoadError("Could not load problems. Make sure problems.json exists in the public/ folder.");
+      setBuddyMood('neutral');
+      setBuddyMsg("Hmm, I can't find any problems to show you...");
+    } finally {
+      setLoading(false);
     }
-
-    setProblems(categoryProblems.slice(0, 5));
-    
-    setPool(prev => ({
-      ...prev,
-      [category]: prev[category].slice(5)
-    }));
-
-    fillPools(category);
-
-    setCurrentIndex(0);
-    setLoading(false);
-    setBuddyMood('neutral');
-    setBuddyMsg(`Complete this round to earn a new Stuffy Friend!`);
-    setShowTrick(false);
   };
 
   const handleSolve = (isCorrect: boolean) => {
@@ -263,10 +232,22 @@ const App: React.FC = () => {
 
           <MathBuddy message={buddyMsg} mood={buddyMood} />
 
-          {loading ? (
+          {loadError ? (
+            <div className="bg-white p-12 rounded-[40px] shadow-2xl border-b-[12px] border-red-100 text-center">
+              <div className="text-6xl mb-6">😕</div>
+              <h2 className="text-2xl font-black text-red-600 mb-4">Oops!</h2>
+              <p className="text-lg text-gray-600 font-medium mb-8">{loadError}</p>
+              <button
+                onClick={() => setView('home')}
+                className="bg-blue-600 text-white px-8 py-4 rounded-[24px] text-lg font-black shadow-[0_8px_0_0_#1e3a8a] active:translate-y-1 active:shadow-none transition-all"
+              >
+                Back to Map 🏰
+              </button>
+            </div>
+          ) : loading ? (
             <div className="bg-white p-20 rounded-[40px] shadow-2xl border-b-[12px] border-blue-100 flex flex-col items-center justify-center gap-8">
               <div className="w-24 h-24 border-8 border-blue-600 border-t-transparent rounded-full animate-spin" />
-              <p className="text-3xl font-black text-blue-900">Loading Magic Problems...</p>
+              <p className="text-3xl font-black text-blue-900">Loading Problems...</p>
             </div>
           ) : newBadge ? (
             <div className="bg-white p-12 rounded-[40px] shadow-2xl border-b-[12px] border-pink-200 text-center animate-bounce-in">
