@@ -11,6 +11,9 @@ interface CollectionViewProps {
 const SET_LABELS: Record<string, string> = {
   spooky_study: 'Spooky Study Set',
   galaxy_lab: 'Galaxy Lab Set',
+  forest_friends: 'Forest Friends Set',
+  candy_workshop: 'Candy Workshop Set',
+  ocean_voyage: 'Ocean Voyage Set',
 };
 
 const CollectionView: React.FC<CollectionViewProps> = ({ progress, updateProgress, onGoHome }) => {
