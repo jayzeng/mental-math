@@ -185,7 +185,7 @@ const ArenaView: React.FC<ArenaViewProps> = ({ category, progress, updateProgres
         </div>
       ) : currentProblem ? (
         <div className="relative">
-          <ProblemCard problem={currentProblem} onSolve={handleSolve} onHelp={handleHelp} />
+          <ProblemCard key={currentProblem.id} problem={currentProblem} onSolve={handleSolve} onHelp={handleHelp} />
           {showTrick && (
             <div className="mt-8 bg-amber-400 border-b-8 border-amber-600 p-8 rounded-[32px] animate-fade-in shadow-xl">
               <h4 className="font-black text-amber-900 text-2xl flex items-center gap-2 mb-3">

@@ -7,7 +7,7 @@ let cachedPool: ProblemPool | null = null;
 async function loadPool(): Promise<ProblemPool> {
   if (cachedPool) return cachedPool;
 
-  const resp = await fetch("/problems.json");
+  const resp = await fetch(`${import.meta.env.BASE_URL}problems.json`);
   if (!resp.ok) {
     throw new Error(`Failed to load problems.json: ${resp.status}`);
   }

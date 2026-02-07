@@ -27,4 +27,4 @@ const MathBuddy: React.FC<MathBuddyProps> = ({ message, mood }) => {
   );
 };
 
-export default MathBuddy;
+export default React.memo(MathBuddy);

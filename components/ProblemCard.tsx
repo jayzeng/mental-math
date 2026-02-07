@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { Problem } from '../types';
 
 interface ProblemCardProps {
@@ -8,17 +8,12 @@ interface ProblemCardProps {
   onHelp: () => void;
 }
 
+// Fix: Use key={problem.id} on the parent instead of an effect to reset state.
+// Each new problem mounts a fresh ProblemCard, so initial state is always clean.
 const ProblemCard: React.FC<ProblemCardProps> = ({ problem, onSolve, onHelp }) => {
   const [userInput, setUserInput] = useState('');
   const [isSolved, setIsSolved] = useState(false);
   const [isWrong, setIsWrong] = useState(false);
-
-  // Reset local state when a new problem arrives
-  useEffect(() => {
-    setUserInput('');
-    setIsSolved(false);
-    setIsWrong(false);
-  }, [problem]);
 
   const checkAnswer = () => {
     if (!userInput.trim()) return;
