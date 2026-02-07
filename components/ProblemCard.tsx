@@ -57,7 +57,7 @@ const ProblemCard: React.FC<ProblemCardProps> = ({ problem, onSolve, onHelp }) =
   };
 
   // Multiple choice logic: check if options array exists and has content
-  const isMultipleChoice = problem.options && problem.options.length > 0;
+  const isMultipleChoice = problem.options != null && problem.options.length > 0;
 
   return (
     <div className={`bg-white p-10 rounded-[40px] shadow-2xl border-b-[12px] border-gray-200 transition-all ${isWrong ? 'animate-shake' : ''}`}>
