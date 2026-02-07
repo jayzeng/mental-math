@@ -1,5 +1,6 @@
 import React, { useState, useCallback } from 'react';
 import { CategoryType } from './types';
+import { STUFFY_BADGES } from './constants';
 import { useProgress } from './hooks/useProgress';
 import Header from './components/Header';
 import HomeView from './components/HomeView';
@@ -31,7 +32,7 @@ const GLOBAL_STYLES = (
 
 const FOOTER = (
   <div className="mt-20 text-center">
-    <p className="text-gray-900 font-black text-lg opacity-40">Made with 💙 by Pixel the Robot &copy; 2025</p>
+    <p className="text-gray-900 font-black text-lg opacity-40">Made with 💙 by Jay Z (Daddy power) &copy; 2025</p>
   </div>
 );
 
@@ -50,11 +51,22 @@ const App: React.FC = () => {
     setView('arena');
   }, []);
 
+  const totalSolved = Object.values(progress.completedCategories).reduce(
+    (sum, count) => sum + count,
+    0
+  );
+  const progressCount =
+    view === 'arena' && selectedCategory
+      ? progress.completedCategories[selectedCategory]
+      : totalSolved;
+  const progressTotal = STUFFY_BADGES.length;
+
   return (
     <div className="max-w-4xl mx-auto px-4 py-8 md:py-12">
       <Header
         level={progress.level}
-        badgeCount={progress.badges.length}
+        progressCount={progressCount}
+        progressTotal={progressTotal}
         onGoHome={goHome}
         onViewCollection={goCollection}
       />
@@ -66,11 +78,15 @@ const App: React.FC = () => {
           onViewCollection={goCollection}
         />
       ) : view === 'collection' ? (
-        <CollectionView badgeIds={progress.badges} onGoHome={goHome} />
+        <CollectionView
+          progress={progress}
+          updateProgress={updateProgress}
+          onGoHome={goHome}
+        />
       ) : selectedCategory ? (
         <ArenaView
           category={selectedCategory}
-          progress={progress}
+          seenProblemIds={progress.seenProblemIds}
           updateProgress={updateProgress}
           onGoHome={goHome}
         />

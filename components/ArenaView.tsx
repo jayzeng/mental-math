@@ -1,18 +1,20 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { CategoryType, Problem, UserProgress, StuffyBadge } from '../types';
+import { CategoryType, Problem, SessionStats, UserProgress, StuffyBadge } from '../types';
 import { STUFFY_BADGES } from '../constants';
 import { getProblems, getLocalBuddyResponse } from '../services/geminiService';
+import { markProblemsAsked, markProblemAnswered } from '../services/indexedDb';
+import { evaluateBadgesAfterSession } from '../services/badgeEngine';
 import MathBuddy from './MathBuddy';
 import ProblemCard from './ProblemCard';
 
 interface ArenaViewProps {
   category: CategoryType;
-  progress: UserProgress;
+  seenProblemIds: string[];
   updateProgress: (updater: (prev: UserProgress) => UserProgress) => void;
   onGoHome: () => void;
 }
 
-const ArenaView: React.FC<ArenaViewProps> = ({ category, progress, updateProgress, onGoHome }) => {
+const ArenaView: React.FC<ArenaViewProps> = ({ category, seenProblemIds, updateProgress, onGoHome }) => {
   const [problems, setProblems] = useState<Problem[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -22,11 +24,23 @@ const ArenaView: React.FC<ArenaViewProps> = ({ category, progress, updateProgres
   const [showTrick, setShowTrick] = useState(false);
   const [newBadge, setNewBadge] = useState<StuffyBadge | null>(null);
 
-  // Fix #4: Use refs to avoid stale closures in setTimeout
+  // Use refs to avoid stale closures in setTimeout
   const problemsRef = useRef(problems);
   problemsRef.current = problems;
   const currentIndexRef = useRef(currentIndex);
   currentIndexRef.current = currentIndex;
+
+  // Capture seenProblemIds in a ref so the load effect doesn't re-fire on progress updates
+  const seenIdsRef = useRef(seenProblemIds);
+  seenIdsRef.current = seenProblemIds;
+
+  // Lightweight session tracking for badge logic
+  const sessionStartRef = useRef<number>(Date.now());
+  const correctCountRef = useRef(0);
+  const incorrectCountRef = useRef(0);
+  const answerTimeTotalRef = useRef(0); // ms
+  const answeredCountRef = useRef(0);
+  const questionStartedAtRef = useRef<number | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -37,7 +51,7 @@ const ArenaView: React.FC<ArenaViewProps> = ({ category, progress, updateProgres
       setNewBadge(null);
 
       try {
-        const categoryProblems = await getProblems(category, 5, progress.seenProblemIds);
+        const categoryProblems = await getProblems(category, 5, seenIdsRef.current);
 
         if (cancelled) return;
 
@@ -52,6 +66,17 @@ const ArenaView: React.FC<ArenaViewProps> = ({ category, progress, updateProgres
         setBuddyMood('neutral');
         setBuddyMsg('Complete this round to earn a new Stuffy Friend!');
         setShowTrick(false);
+
+        // Reset session metrics
+        sessionStartRef.current = Date.now();
+        correctCountRef.current = 0;
+        incorrectCountRef.current = 0;
+        answerTimeTotalRef.current = 0;
+        answeredCountRef.current = 0;
+        questionStartedAtRef.current = Date.now();
+
+        // Mark these problems as "asked" in IndexedDB for long-term tracking
+        void markProblemsAsked(categoryProblems);
       } catch (err) {
         if (cancelled) return;
         console.error('Failed to load problems:', err);
@@ -68,21 +93,46 @@ const ArenaView: React.FC<ArenaViewProps> = ({ category, progress, updateProgres
   }, [category]); // Only reload when category changes
 
   const handleSolve = useCallback((isCorrect: boolean) => {
+    const solvedProblem = problemsRef.current[currentIndexRef.current];
+
+    if (!solvedProblem) return;
+
+    // Record answered state (correct or incorrect) in IndexedDB
+    void markProblemAnswered(solvedProblem, isCorrect);
+
+    // Update lightweight session stats
+    if (isCorrect) {
+      const now = Date.now();
+      if (questionStartedAtRef.current != null) {
+        const delta = now - questionStartedAtRef.current;
+        answerTimeTotalRef.current += delta;
+        answeredCountRef.current += 1;
+      }
+      correctCountRef.current += 1;
+    } else {
+      incorrectCountRef.current += 1;
+    }
+
     if (isCorrect) {
       setBuddyMood('happy');
       setBuddyMsg(getLocalBuddyResponse(true));
 
-      // Use functional setState + refs to avoid stale closures
-      const solvedProblem = problemsRef.current[currentIndexRef.current];
-
-      updateProgress((prev) => ({
-        ...prev,
-        seenProblemIds: [...prev.seenProblemIds, solvedProblem.id],
-        completedCategories: {
+      // Track which problems you’ve seen so we can avoid repeats
+      updateProgress((prev) => {
+        const nextSeen = prev.seenProblemIds.includes(solvedProblem.id)
+          ? prev.seenProblemIds
+          : [...prev.seenProblemIds, solvedProblem.id];
+        const nextCompleted = {
           ...prev.completedCategories,
-          [category]: prev.completedCategories[category] + 1,
-        },
-      }));
+          [category]: (prev.completedCategories?.[category] ?? 0) + 1,
+        };
+
+        return {
+          ...prev,
+          seenProblemIds: nextSeen,
+          completedCategories: nextCompleted,
+        };
+      });
 
       setTimeout(() => {
         const idx = currentIndexRef.current;
@@ -92,25 +142,67 @@ const ArenaView: React.FC<ArenaViewProps> = ({ category, progress, updateProgres
           setCurrentIndex((prev) => prev + 1);
           setBuddyMood('neutral');
           setShowTrick(false);
+          // Start timing next question
+          questionStartedAtRef.current = Date.now();
         } else {
-          // Finished the round — award a badge
-          // Read latest progress via updateProgress's functional form
+          // Finished the round — evaluate badge unlocks based on this session.
+          const endedAt = Date.now();
+          const questions = probs.length;
+          const sessionStats: SessionStats = {
+            id: `${category}-${endedAt}`,
+            category,
+            startedAt: sessionStartRef.current,
+            endedAt,
+            questions,
+            correct: correctCountRef.current,
+            incorrect: incorrectCountRef.current,
+            avgAnswerTimeSeconds:
+              answeredCountRef.current > 0
+                ? answerTimeTotalRef.current / answeredCountRef.current / 1000
+                : undefined,
+          };
+
+          let awardedBadges: StuffyBadge[] = [];
+          let collectionComplete = false;
+
           updateProgress((prev) => {
-            const availableBadges = STUFFY_BADGES.filter((b) => !prev.badges.includes(b.id));
-            if (availableBadges.length > 0) {
-              const randomBadge = availableBadges[Math.floor(Math.random() * availableBadges.length)];
-              setNewBadge(randomBadge);
-              setBuddyMsg(`WHOA! You unlocked ${randomBadge.name}! 🥳`);
-              return {
-                ...prev,
-                badges: [...prev.badges, randomBadge.id],
-                level: prev.level + (prev.badges.length % 5 === 0 ? 1 : 0),
-              };
-            } else {
-              setBuddyMsg("You've collected ALL the stuffies! You're a Math Master! 🏆");
-              return prev;
+            const { newBadges, updatedProgress } = evaluateBadgesAfterSession(prev, sessionStats);
+            awardedBadges = newBadges;
+
+            // Level up every time we cross a multiple of 5 badges
+            const beforeCount = prev.badges.length;
+            const afterCount = updatedProgress.badges.length;
+            let level = updatedProgress.level;
+            if (afterCount > beforeCount) {
+              const beforeThreshold = Math.floor(beforeCount / 5);
+              const afterThreshold = Math.floor(afterCount / 5);
+              if (afterThreshold > beforeThreshold) {
+                level += 1;
+              }
             }
+
+            // Track whether the collection is actually complete
+            collectionComplete = afterCount >= STUFFY_BADGES.length;
+
+            return {
+              ...updatedProgress,
+              level,
+            };
           });
+
+          if (awardedBadges.length > 0) {
+            // For now, spotlight the last badge unlocked this session
+            const spotlight = awardedBadges[awardedBadges.length - 1];
+            setNewBadge(spotlight);
+            setBuddyMsg(`WHOA! You unlocked ${spotlight.name}! 🥳`);
+          } else if (collectionComplete) {
+            setNewBadge(null);
+            setBuddyMsg("You've collected ALL the stuffies! You're a Math Master! 🏆");
+          } else {
+            // No badge this round (e.g., all answers incorrect)
+            setNewBadge(null);
+            setBuddyMsg("Nice work! This round didn’t unlock a new badge, but you charged up your streak.");
+          }
           setBuddyMood('happy');
         }
       }, 2000);

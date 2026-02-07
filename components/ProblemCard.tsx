@@ -8,19 +8,21 @@ interface ProblemCardProps {
   onHelp: () => void;
 }
 
-// Fix: Use key={problem.id} on the parent instead of an effect to reset state.
+// Use key={problem.id} on the parent instead of an effect to reset state.
 // Each new problem mounts a fresh ProblemCard, so initial state is always clean.
 const ProblemCard: React.FC<ProblemCardProps> = ({ problem, onSolve, onHelp }) => {
   const [userInput, setUserInput] = useState('');
   const [isSolved, setIsSolved] = useState(false);
   const [isWrong, setIsWrong] = useState(false);
 
+  // Cache normalized answer once per problem (component remounts per problem via key)
+  const normalizedAnswer = String(problem.answer).toLowerCase();
+
   const checkAnswer = () => {
     if (!userInput.trim()) return;
-    
-    // Simple local check
-    const isCorrect = userInput.trim().toLowerCase() === String(problem.answer).toLowerCase();
-    
+
+    const isCorrect = userInput.trim().toLowerCase() === normalizedAnswer;
+
     if (isCorrect) {
       setIsSolved(true);
       setIsWrong(false);
@@ -28,7 +30,6 @@ const ProblemCard: React.FC<ProblemCardProps> = ({ problem, onSolve, onHelp }) =
     } else {
       setIsWrong(true);
       onSolve(false);
-      // Shake effect
       setTimeout(() => setIsWrong(false), 500);
     }
   };
@@ -36,9 +37,9 @@ const ProblemCard: React.FC<ProblemCardProps> = ({ problem, onSolve, onHelp }) =
   const handleOptionClick = (option: string) => {
     if (isSolved) return;
     setUserInput(option);
-    
-    const isCorrect = option.trim().toLowerCase() === String(problem.answer).toLowerCase();
-    
+
+    const isCorrect = option.trim().toLowerCase() === normalizedAnswer;
+
     if (isCorrect) {
       setIsSolved(true);
       setIsWrong(false);
@@ -46,7 +47,6 @@ const ProblemCard: React.FC<ProblemCardProps> = ({ problem, onSolve, onHelp }) =
     } else {
       setIsWrong(true);
       onSolve(false);
-      // Brief shake animation reset
       setTimeout(() => setIsWrong(false), 500);
     }
   };
@@ -69,7 +69,7 @@ const ProblemCard: React.FC<ProblemCardProps> = ({ problem, onSolve, onHelp }) =
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
           {problem.options!.map((opt, i) => {
             const isUserSelection = userInput === opt;
-            const isCorrectAnswer = opt.toLowerCase() === String(problem.answer).toLowerCase();
+            const isCorrectAnswer = opt.toLowerCase() === normalizedAnswer;
             
             let btnClass = 'bg-blue-50 border-blue-200 hover:border-blue-400 text-blue-900 hover:bg-blue-100';
             if (isSolved && isCorrectAnswer) {
@@ -139,4 +139,4 @@ const ProblemCard: React.FC<ProblemCardProps> = ({ problem, onSolve, onHelp }) =
   );
 };
 
-export default ProblemCard;
+export default React.memo(ProblemCard);
